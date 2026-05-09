@@ -1,0 +1,20 @@
+# Virtual environments
+ambiente_ai/
+
+# C++ compiled files
+build/
+*.o
+
+# AI models and cache
+*.pt
+.cache/
+__pycache__/
+
+# Local editor configurations
+.vscode/
+
+# Other
+.venv/
+attempt*
+*.mp4
+*.mov
