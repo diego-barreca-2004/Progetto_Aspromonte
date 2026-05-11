@@ -20,10 +20,10 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    Mat frame; // empty header
     // 360° or equirectangular video (input) dimensions
     int video_width = cap.get(CAP_PROP_FRAME_WIDTH);
     int video_height = cap.get(CAP_PROP_FRAME_HEIGHT);
+    Mat frame; // empty header
     const int OUTPUT_FACE_DIM = 1024; // output face dimensions
     Mat map_x[3], map_y[3]; // left, front and right matrices of a Cubemap
     for(int i = 0; i < 3; ++i) {
