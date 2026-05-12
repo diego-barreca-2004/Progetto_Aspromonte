@@ -9,23 +9,26 @@
 
 The project aims to reproduce, as faithfully as possible, the environment captured by a 360° action camera within a digital twin—specifically, a navigable, video-game style Open World. The input consists of video feeds coupled with GPS metadata, enabling not just a temporal but also a spatial mapping of the observed environment. This automated pipeline is designed to be globally scalable: a 360° video recorded with GPS data in Alaska should be processed just as flawlessly as one recorded in South Africa.
 
-During the development phase, various challenges emerged, primarily geometric. When projecting a continuous spherical environment onto the discrete flat faces of a cube (Cubemap) via *Backward Mapping*, the resulting 2D planes suffer from geometric distortion at their boundaries. Because this pipeline horizontally concatenates these faces into a single, wide panoramic frame for inference, objects spanning across the seams appear bent or spatially disjointed. When standard 2D Convolutional Neural Networks (like YOLO) process this concatenated frame, the convolution kernels interpret these projection artifacts as real physical deformities, leading to blind spots and fragmented bounding boxes. This phenomenon is known as *Seam Discontinuity*.
+During the development phase, two major structural challenges emerged:
+1. **Seam Discontinuity:** When projecting a continuous spherical environment onto the discrete flat faces of a cube (Cubemap), objects spanning across the seams appear bent or spatially disjointed. Convolutional Neural Networks interpret these projection artifacts as physical deformities.
+2. **Root-Point Anchoring:** Traditional bounding box regressions (like YOLO) inherently fail to provide the surgical 3D anchoring required for spawning Digital Twin assets. A bounding box center often floats in empty space, whereas spawning a 3D object (e.g., a tree or a building) in an Open World engine requires its exact ground-contact footprint.
 
-To address this critical structural flaw, this project explores two divergent paths. The main pipeline establishes a functional baseline using standard 2D object detection on the concatenated cubemap projection, intentionally operating within these inherent boundary limitations. Concurrently, an experimental branch aims to implement state-of-the-art Spherical Convolutional Neural Networks (Spherical CNNs). This advanced path seeks to process the equirectangular format natively on the sphere, entirely bypassing the cubemap projection and mathematically eliminating the seam discontinuity artifacts.
+To address these limitations, the project is structured into two parallel branches:
+* **The Main Branch (Real-Time Baseline):** Establishes a highly optimized, high-FPS baseline using standard 2D object detection (YOLO) on the concatenated cubemap projection, intentionally operating within these inherent boundary and bounding-box limitations to prioritize real-time processing.
+* **The Experimental Branch (High-Fidelity Topography):** Abandons bounding boxes and planar projections entirely. It utilizes the HEALPix (Hierarchical Equal Area isoLatitude Pixelization) grid and Spherical Transformers to perform precise **Spherical Semantic Segmentation**. By classifying every single pixel natively on the sphere, this branch extracts exact object footprints to achieve mathematically perfect 3D asset instantiation.
 
 ## 2. System Architecture
 
 The core of the project relies on a highly optimized, cross-language data pipeline:
 
-1. **Acquisition:** The 360° video, encoded in ProRes 422 to maximize pixel fidelity (yielding approximately 20GB per minute—making VRAM and memory management a critical component of the architecture), is decoded and split into individual frames using the OpenCV library in C++.
-2. **Geometric Engine (C++):** Each frame undergoes a transformation technique known as *Backward Mapping* to convert the equirectangular format into the flat faces of a cubemap. Unlike Forward Mapping, Backward Mapping starts from the destination plane to determine the exact corresponding source pixel on the sphere, avoiding empty pixels. Within `main.cpp`, the mathematical projection (calculating Longitude $\theta$ and Latitude $\phi$) is resolved in $O(1)$ during initialization, generating static Lookup Tables (`map_x`, `map_y`). 
-   * **Zero-Copy Memory:** Instead of computationally expensive horizontal concatenations, a single target matrix (`panoramic_frame` of $3072 \times 1024$ pixels) is pre-allocated. The left, front, and right faces are populated directly in place using memory offsets via Regions of Interest (ROI).
-   * **Interpolation & Boundary Management:** The matrices are populated using the `remap` function with `INTER_LINEAR` interpolation. Crucially, the `BORDER_WRAP` flag is applied to maintain toroidal continuity when spherical coordinates exceed the $360^\circ$ boundary. The resulting binary stream is piped to standard output.
-3. **Inter-Process Communication (IPC):** The Python environment leverages the `subprocess.Popen` module to instantiate the C++ engine as a child process and capture its `stdout` byte stream. This stream is ingested into a 1D `uint8` array via NumPy, reshaped into a 3D tensor ($1024, 3072, 3$), and explicitly duplicated using the `.copy()` method to ensure mutability before reaching PyTorch.
-4. **Inference Engine (PyTorch & YOLO):** To benchmark architectural improvements, two distinct versions were developed:
-   * **YOLOv5 Pipeline:** Requires manual tensor preprocessing: tensor slicing to convert BGR to RGB, spatial downsampling (to respect the $2^5$ Stride architecture while maintaining the 3:1 aspect ratio), transposition of color channels (HWC to CHW), addition of the batch dimension, and normalization to `[0.0, 1.0]`. A custom Non-Maximum Suppression (NMS) algorithm handles spatial conflicts.
-   * **YOLO26 Pipeline:** Encapsulates the entire preprocessing, inference, and NMS pipeline within a unified, highly optimized `.predict()` method, natively exploiting the Tensor Cores.
-5. **Post-Processing (Vectorization):** Both models output 2D tensors located in VRAM. To avoid the severe performance penalty of the Python interpreter inside execution loops, the tensors are brought to the CPU and cast to native integers in bulk using NumPy's C-backend vectorization (`.astype(int)`). OpenCV's `.rectangle()` and `.putText()` functions are then invoked to render the detections in real-time.
+1. **Acquisition:** The 360° video, encoded in ProRes 422 to maximize pixel fidelity, is decoded and split into individual frames using the OpenCV library in C++.
+2. **Geometric Engine (C++):** Depending on the active branch, the engine handles the spatial topology differently:
+   * **Main Branch (Cubemap):** Each frame undergoes *Backward Mapping*. A single target matrix ($3072 \times 1024$ pixels) is pre-allocated. The left, front, and right faces are populated directly in place using memory offsets via Regions of Interest (ROI). The `BORDER_WRAP` flag is applied to maintain toroidal continuity.
+   * **Experimental Branch (HEALPix):** The engine natively samples the equirectangular frame into a 1D array of equal-area pixels using the HEALPix C++ library, preserving the exact spherical topology without seam distortions.
+3. **Inter-Process Communication (IPC):** The Python environment leverages `subprocess.Popen` to instantiate the C++ engine as a child process. The raw binary stream (`stdout`) is ingested into a 1D `uint8` array via NumPy and explicitly duplicated (`.copy()`) to ensure mutability before deep learning ingestion.
+4. **Inference Engine (PyTorch):** * **Main Branch (YOLO26):** Encapsulates the entire preprocessing, inference, and NMS pipeline within a unified `.predict()` method, outputting 2D bounding box tensors.
+   * **Experimental Branch (Spherical U-Net):** The 1D HEALPix array is processed using the `healpy` Python library and a custom Spherical Transformer module to reconstruct local neighborhoods. A PyTorch U-Net architecture then performs pixel-perfect semantic segmentation directly on the continuous sphere.
+5. **Post-Processing (Vectorization):** To avoid the severe performance penalty of the Python interpreter, VRAM tensors are brought to the CPU and cast to native integers in bulk using NumPy's C-backend vectorization (`.astype(int)`).
 
 ## 3. Hardware and Software Prerequisites
 
@@ -35,9 +38,9 @@ The core of the project relies on a highly optimized, cross-language data pipeli
 
 **Software Dependencies**
 * NVIDIA CUDA Toolkit and cuDNN.
-* **C++ Environment:** `g++-13` (supporting C++20 and C++23 standards), CMake, and OpenCV C++ API.
+* **C++ Environment:** `g++-13` (supporting C++20 and C++23 standards), CMake, HEALPix C++ API, and OpenCV C++ API.
 * **Python Environment:** Python 3.x with a dedicated virtual environment (`venv`).
-* **Core Python Libraries:** `torch`, `numpy`, `ultralytics` (for YOLO26), and standard utility scripts for YOLOv5 NMS.
+* **Core Python Libraries:** `torch`, `numpy`, `opencv-python`, `ultralytics` (for the Main Branch), and `healpy` (for the Experimental Branch).
 
 ## 4. Build and Installation
 
@@ -72,25 +75,23 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 # Install the required deep learning dependencies
-pip install torch torchvision numpy opencv-python ultralytics
+pip install torch torchvision numpy opencv-python ultralytics healpy
 
 ```
 
 ## 5. Usage
 
-The architecture is designed to handle the IPC internally within Python, eliminating the need for manual Unix pipes. The Python script autonomously launches the compiled C++ binary and manages the buffer.
-
-To execute the full pipeline (Geometric Engine + Object Detection):
+The architecture handles the IPC internally within Python. The Python script autonomously launches the compiled C++ binary and manages the buffer.
 
 ```bash
 # Ensure the virtual environment is active
 source .venv/bin/activate
 
-# Execute the YOLO26 Engine (auto-loads 'attempt.mov' if no argument is provided)
-python3 yolo26.py 
-
-# Or specify a custom video path
+# Main Branch: Execute the YOLO26 Engine 
 python3 yolo26.py /path/to/your/video.mp4
+
+# Experimental Branch: Execute the Spherical Semantic Segmentation Engine
+python3 spherical_unet.py /path/to/your/video.mp4
 
 ```
 
@@ -100,5 +101,5 @@ This project is licensed under the **GNU AGPL-3.0 License**. See the `LICENSE` f
 
 **Acknowledgments:**
 
-* The core object detection framework relies heavily on the open-source architectures provided by [Ultralytics](https://github.com/ultralytics/ultralytics).
-* The experimental branch for resolving *Seam Discontinuity* takes direct inspiration from Google Research's work on [Scalable Spherical CNNs](https://github.com/google-research/spherical-cnn) utilizing the JAX framework.
+* The core object detection baseline relies on the open-source architectures provided by [Ultralytics](https://github.com/ultralytics/ultralytics).
+* The experimental branch for resolving *Seam Discontinuity* and *Root-Point Anchoring* is heavily inspired by the **[Spherical Transformer](https://arxiv.org/pdf/2101.03848)** methodology proposed by Liu et al. (2021) and leverages the [healpy](https://github.com/healpy/healpy) package for topological sphere pixelization.
