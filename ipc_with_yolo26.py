@@ -1,3 +1,5 @@
+import sys
+import os
 import subprocess
 import numpy as np
 import torch
@@ -6,16 +8,30 @@ from ultralytics import YOLO
 
 # MODEL INITIALIZATION #
 
-device = torch.device("cuda")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = YOLO('yolo26s.pt')
 model.to(device)
 
 # C++ MANAGEMENT #
 
-process = subprocess.Popen(["./build/Aspromonte"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-width = 1024 * 3 # left, front and right faces of the cubemap
-height = 1024
-frame_size = width * height * 3
+DEFAULT_VIDEO_PATH = "attempt.mov" # local video input
+EXECUTABLE_PATH = "./build/Aspromonte"
+
+if len(sys.argv) >= 2: # to use the video path passed via command line
+    VIDEO_PATH = sys.argv[1]
+elif os.path.exists(DEFAULT_VIDEO_PATH): # to use the local video input
+    VIDEO_PATH = DEFAULT_VIDEO_PATH
+    print(f"\nAuto-loading local default video: '{VIDEO_PATH}'\n")
+else: # to force to pass the video path via command line
+    print(f"Correct usage is: python3 {sys.argv[0]} <video_path>")
+    sys.exit(1)
+
+process = subprocess.Popen([EXECUTABLE_PATH, VIDEO_PATH], stdout=subprocess.PIPE)
+
+WIDTH = 1024 * 3
+HEIGHT = 1024
+COLOR_CHANNELS = 3
+frame_size = WIDTH * HEIGHT * COLOR_CHANNELS
 
 # INFERENCE #
 
@@ -25,17 +41,13 @@ while True:
     if not raw_bytes: 
         break
     elif len(raw_bytes) < frame_size:
-        print("Corrupted frame")
-
-        err = process.stderr.read()
-        if err:
-            print("C++ error: ", err.decode('utf-8'))
+        print("WARNING! Incomplete frame received or End of File reached. Exiting stream...")
         break
 
     # NUMPY PIPELINE #
 
     frame_1d = np.frombuffer(raw_bytes, dtype=np.uint8) 
-    frame_3d = np.reshape(frame_1d, (height, width, 3)).copy()
+    frame_3d = np.reshape(frame_1d, (HEIGHT, WIDTH, COLOR_CHANNELS)).copy()
     
     # PYTORCH PIPELINE #
 
@@ -45,13 +57,13 @@ while True:
     # VRAM -> CPU #
 
     if len(predictions.boxes) > 0:
-        boxes = predictions.boxes.xyxy.cpu().numpy()
+        boxes = predictions.boxes.xyxy.cpu().numpy().astype(int)
         confidences = predictions.boxes.conf.cpu().numpy()
-        coco_classes = predictions.boxes.cls.cpu().numpy()
+        coco_classes = predictions.boxes.cls.cpu().numpy().astype(int)
         for i in range(len(boxes)):
-            x1, y1, x2, y2 = map(int, boxes[i])
+            x1, y1, x2, y2 = boxes[i]
             confidence = confidences[i]
-            coco_class = int(coco_classes[i])
+            coco_class = coco_classes[i]
 
             class_name = model.names[coco_class]
             label = f"{class_name} {int(confidence * 100)}%"
@@ -68,6 +80,5 @@ while True:
         break
 
 process.stdout.close()
-process.stderr.close()
 process.wait()
 cv2.destroyAllWindows()
