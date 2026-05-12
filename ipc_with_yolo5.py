@@ -53,10 +53,10 @@ while True: # infinite loop
     frame_3d = np.reshape(frame_1d, (HEIGHT, WIDTH, COLOR_CHANNELS)).copy() # 1D -> 3D array... and .copy() needed: without it, it would be a read-only array
     
     # Spatial downsampling to reduce (almost halve in this case) VRAM consumption by the model
-    NET_W, NET_H = 960, 320 # Network Width and Height which need to be multiples of 2(^5) for YOLOv5 (still 3 : 1 ratio)
+    NET_W, NET_H = 960, 320 # dimensions must be multiples of 32 (Max Stride architecture constraint), while keeping the 3:1 ratio
     scale_x = WIDTH / NET_W
     scale_y = HEIGHT / NET_H
-    frame_resized_net = cv2.resize(frame_3d, (NET_W, NET_H))
+    frame_resized_net = cv2.resize(frame_3d, (NET_W, NET_H)) # scaled frame
 
     frame_rgb = frame_resized_net[:, :, ::-1] # BGR -> RGB colors (tensor slicing used to invert only the order of the color channels)
     frame_chw = np.transpose(frame_rgb, (2, 0, 1)) # puts the color channels first to optimize spatial locality for neural network convolutions
