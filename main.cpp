@@ -52,6 +52,7 @@ int main(int argc, char** argv) {
         for(int i = 0; i < OUTPUT_FACE_DIM; ++i)
             for(int j = 0; j < OUTPUT_FACE_DIM; ++j) {
                 float X, Y, Z; // vector coordinates needed to move through the faces of the Cubemap
+                
                 // Coordinates normalization to: [-1, 1]
                 float x = (j / (float)OUTPUT_FACE_DIM) * 2.0f - 1.0f;
                 float y = (i / (float)OUTPUT_FACE_DIM) * 2.0f - 1.0f;
