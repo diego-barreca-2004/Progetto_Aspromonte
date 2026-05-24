@@ -6,13 +6,13 @@ import torch
 import cv2
 from ultralytics import YOLO
 
-# MODEL INITIALIZATION #
+# --- MODEL INITIALIZATION --- #
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = YOLO('yolo26s.pt')
 model.to(device)
 
-# C++ MANAGEMENT #
+# --- C++ MANAGEMENT --- #
 
 DEFAULT_VIDEO_PATH = "attempt.mov" # local video input
 EXECUTABLE_PATH = "./build/Aspromonte"
@@ -33,7 +33,7 @@ HEIGHT = 1024
 COLOR_CHANNELS = 3
 frame_size = WIDTH * HEIGHT * COLOR_CHANNELS
 
-# INFERENCE #
+# --- INFERENCE --- #
 
 while True:
     raw_bytes = process.stdout.read(frame_size)
@@ -44,17 +44,17 @@ while True:
         print("WARNING! Incomplete frame received or End of File reached. Exiting stream...")
         break
 
-    # NUMPY PIPELINE #
+    # --- NUMPY PIPELINE --- #
 
     frame_1d = np.frombuffer(raw_bytes, dtype=np.uint8) 
     frame_3d = np.reshape(frame_1d, (HEIGHT, WIDTH, COLOR_CHANNELS)).copy()
     
-    # PYTORCH PIPELINE #
+    # --- PYTORCH PIPELINE --- #
 
     results = model.predict(source=frame_3d, device=device, verbose=False) # incapsulates tensors slicing, normalizations, transpositions, NMS, ...
     predictions = results[0] # results[0] already contains bounding boxes etc.
 
-    # VRAM -> CPU #
+    # --- VRAM -> CPU --- #
 
     if len(predictions.boxes) > 0:
         boxes = predictions.boxes.xyxy.cpu().numpy().astype(int)
@@ -71,7 +71,7 @@ while True:
             cv2.rectangle(frame_3d, (x1, y1), (x2, y2), (0, 255, 0), 2)
             cv2.putText(frame_3d, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
-    # OUTPUT ON SCREEN #
+    # --- OUTPUT ON SCREEN --- #
 
     frame_resized = cv2.resize(frame_3d, (2560, 1600))
     cv2.imshow("Progetto Aspromonte first attempt with YOLO26", frame_resized)
