@@ -88,7 +88,7 @@ while True: # infinite loop
             coco_class = coco_classes[i] # without decimal figures thanks to .astype(int)
 
             class_name = model.names[coco_class] # gets the COCO class name
-            label = f"{class_name} {int(confidence * 100)}%" # formatted string literal
+            label = f"{class_name} {int(confidence * 100)}%"
 
             cv2.rectangle(frame_3d, (x1, y1), (x2, y2), (0, 255, 0), 2) # creates a green rectangle for each of the bounding boxes with some thickness (2)
             cv2.putText(frame_3d, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2) # adds the formatted green bold text
