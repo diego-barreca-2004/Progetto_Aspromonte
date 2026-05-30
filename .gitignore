@@ -18,3 +18,4 @@ __pycache__/
 attempt*
 *.mp4
 *.mov
+dataset/
