@@ -117,7 +117,7 @@ int main(int argc, char** argv) {
         auto start = high_resolution_clock::now();
 #endif
 
-        // Warp the equirectangular frame into the three cubemap faces,
+        // Warp the equirectangular frame into the three cubemap faces.
         // BORDER_WRAP preserves toroidal continuity at the face edges
         remap(frame, left_roi,  map_x[0], map_y[0], INTER_LINEAR, BORDER_WRAP);
         remap(frame, front_roi, map_x[1], map_y[1], INTER_LINEAR, BORDER_WRAP);
